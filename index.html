@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<!--
+  Kamera-Kompass: Azimuth- und Höhenwinkel-Messer
+  ================================================
+  Einsatz: Statische HTML-Datei, per GitHub Pages hosten und auf dem
+  Smartphone im Browser öffnen (HTTPS erforderlich für Kamera + Sensoren).
+
+  Deployment (kurz):
+  1. Neues GitHub-Repo anlegen (oder bestehendes nutzen), diese Datei
+     z. B. als "index.html" ins Repo hochladen.
+  2. Repo-Einstellungen -> "Pages" -> Branch (z. B. main) + Ordner "/"
+     auswählen -> Speichern. GitHub generiert eine https://…github.io/…-URL.
+  3. Diese URL auf dem Smartphone öffnen (iOS: Safari, Android: Chrome).
+  4. Auf "Kamera & Sensoren aktivieren" tippen und Berechtigungen erlauben.
+
+  Hinweis zur Genauigkeit: Die Werte basieren auf Magnetometer/Gyroskop
+  des Smartphones (DeviceOrientation-API) und sind KEINE Präzisionsmessung.
+  Je nach Gerät und Umgebung (Metall, Magnete, unkalibrierter Kompass)
+  sind Abweichungen von mehreren Grad möglich. Für eine bessere Kalibrierung
+  das Handy einmal in einer liegenden Acht bewegen.
+-->
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
+<title>Kamera-Kompass · Azimuth &amp; Höhenwinkel</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #000; color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  #cam {
+    position: fixed; top: 0; left: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    background: #111;
+    z-index: 0;
+  }
+
+  /* ---- Fadenkreuz in Bildschirmmitte ---- */
+  #crosshair {
+    position: fixed; top: 50%; left: 50%;
+    width: 56px; height: 56px;
+    transform: translate(-50%, -50%);
+    z-index: 5; pointer-events: none;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ""; position: absolute; background: rgba(255,255,255,0.85);
+    box-shadow: 0 0 3px rgba(0,0,0,0.8);
+  }
+  #crosshair::before { top: 50%; left: 0; width: 100%; height: 2px; transform: translateY(-1px); }
+  #crosshair::after  { left: 50%; top: 0; height: 100%; width: 2px; transform: translateX(-1px); }
+  #crosshair .dot {
+    position: absolute; top: 50%; left: 50%; width: 6px; height: 6px;
+    background: #ff4444; border-radius: 50%; transform: translate(-50%, -50%);
+  }
+
+  /* ---- Anzeige oben: Azimuth / Höhenwinkel ---- */
+  #readout {
+    position: fixed; top: 0; left: 0; right: 0;
+    z-index: 6;
+    padding: max(14px, env(safe-area-inset-top)) 16px 12px 16px;
+    background: linear-gradient(rgba(0,0,0,0.75), rgba(0,0,0,0.15));
+    display: flex; justify-content: space-around; align-items: center;
+    gap: 8px;
+  }
+  .metric { text-align: center; flex: 1; }
+  .metric .label { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; }
+  .metric .value { font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.25; }
+  .metric .sub { font-size: 12px; opacity: 0.7; }
+
+  #warnbar {
+    position: fixed; top: 92px; left: 50%; transform: translateX(-50%);
+    z-index: 7; max-width: 92%;
+    background: rgba(180,60,0,0.92); color: #fff;
+    padding: 6px 12px; border-radius: 8px; font-size: 12.5px;
+    text-align: center; display: none;
+  }
+  #warnbar.show { display: block; }
+
+  /* ---- Steuerung unten ---- */
+  #controls {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    z-index: 6;
+    padding: 10px 12px max(12px, env(safe-area-inset-bottom)) 12px;
+    background: linear-gradient(rgba(0,0,0,0.15), rgba(0,0,0,0.8));
+  }
+  .btnrow { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  button {
+    font: inherit; font-size: 14px; font-weight: 600;
+    color: #fff; background: rgba(255,255,255,0.14);
+    border: 1px solid rgba(255,255,255,0.35);
+    border-radius: 10px; padding: 10px 14px;
+    backdrop-filter: blur(4px);
+  }
+  button:active { background: rgba(255,255,255,0.3); }
+  button.primary { background: #2f8f4e; border-color: #2f8f4e; }
+  button.danger { background: rgba(180,40,40,0.5); border-color: rgba(180,40,40,0.8); }
+
+  #log {
+    max-height: 26vh; overflow-y: auto; margin-top: 8px;
+    background: rgba(0,0,0,0.55); border-radius: 10px;
+    display: none;
+  }
+  #log.show { display: block; }
+  #log table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  #log th, #log td { padding: 5px 8px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.1); }
+  #log th:first-child, #log td:first-child { text-align: left; }
+  #log td.del { text-align: center; color: #ff6b6b; font-weight: 700; }
+
+  /* ---- Start-Overlay ---- */
+  #startscreen {
+    position: fixed; inset: 0; z-index: 20;
+    background: #0b0f0c;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 24px; text-align: center; gap: 18px;
+  }
+  #startscreen h1 { font-size: 20px; margin: 0; }
+  #startscreen p { font-size: 14px; opacity: 0.8; max-width: 340px; line-height: 1.5; margin: 0; }
+  #startscreen button { font-size: 17px; padding: 14px 28px; }
+  #starterror { color: #ff8a8a; font-size: 13px; max-width: 340px; display: none; }
+
+  a.hidden-download { display: none; }
+</style>
+</head>
+<body>
+
+  <video id="cam" autoplay playsinline muted></video>
+
+  <div id="readout">
+    <div class="metric">
+      <div class="label">Azimuth</div>
+      <div class="value" id="azVal">–°</div>
+      <div class="sub" id="azDir">–</div>
+    </div>
+    <div class="metric">
+      <div class="label">Höhenwinkel</div>
+      <div class="value" id="elVal">–°</div>
+      <div class="sub" id="elSub">Horizont = 0°</div>
+    </div>
+  </div>
+
+  <div id="warnbar"></div>
+
+  <div id="crosshair"><div class="dot"></div></div>
+
+  <div id="controls">
+    <div class="btnrow">
+      <button class="primary" id="btnSave">📍 Punkt speichern</button>
+      <button id="btnToggleLog">📋 Liste</button>
+      <button id="btnExport">⬇️ CSV</button>
+      <button class="danger" id="btnClear">🗑 Leeren</button>
+    </div>
+    <div id="log">
+      <table>
+        <thead><tr><th>#</th><th>Azimuth</th><th>Höhe</th><th></th></tr></thead>
+        <tbody id="logBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="startscreen">
+    <h1>📷 Kamera-Kompass</h1>
+    <p>
+      Zeigt das Kamerabild als Hintergrund und misst live Azimuth (Himmelsrichtung)
+      und Höhenwinkel, je nachdem wie du das Handy hältst – ideal zum
+      Anpeilen eines Ziels am Horizont (z. B. für eine Verschattungs-/Standortanalyse).
+    </p>
+    <p>Benötigt Zugriff auf Kamera und Bewegungssensoren.</p>
+    <button class="primary" id="btnStart">Kamera &amp; Sensoren aktivieren</button>
+    <div id="starterror"></div>
+  </div>
+
+  <a id="dl" class="hidden-download"></a>
+
+<script>
+(function () {
+  "use strict";
+
+  var camEl = document.getElementById('cam');
+  var azVal = document.getElementById('azVal');
+  var azDir = document.getElementById('azDir');
+  var elVal = document.getElementById('elVal');
+  var warnbar = document.getElementById('warnbar');
+  var startscreen = document.getElementById('startscreen');
+  var starterror = document.getElementById('starterror');
+  var btnStart = document.getElementById('btnStart');
+  var btnSave = document.getElementById('btnSave');
+  var btnToggleLog = document.getElementById('btnToggleLog');
+  var btnExport = document.getElementById('btnExport');
+  var btnClear = document.getElementById('btnClear');
+  var logEl = document.getElementById('log');
+  var logBody = document.getElementById('logBody');
+  var dl = document.getElementById('dl');
+
+  var DEG = Math.PI / 180;
+  var RAD = 180 / Math.PI;
+  var DIRS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+
+  // Geglätteter Blickrichtungs-Vektor (Welt-Koordinaten: x=Ost, y=Nord, z=Oben)
+  var smooth = null;
+  var SMOOTHING = 0.18; // 0 = keine Reaktion, 1 = keine Glättung
+  var lastAzimuth = 0, lastElevation = 0;
+  var records = [];
+  var compassLooksAbsolute = false;
+  var gotAnyOrientation = false;
+
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function normalizeVec(v) {
+    var len = Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+    if (len < 1e-9) return v;
+    return [v[0]/len, v[1]/len, v[2]/len];
+  }
+
+  // Berechnet die Blickrichtung der Rückkamera (Geräte -Z-Achse) im
+  // Welt-Koordinatensystem (x=Ost, y=Nord, z=Oben) aus alpha/beta/gamma.
+  // Herleitung: R = Rz(alpha) * Rx(beta) * Ry(gamma) (W3C DeviceOrientation),
+  // Kamerarichtung = -R * [0,0,1]^T (dritte Spalte von R, negiert).
+  function orientationToVector(alphaDeg, betaDeg, gammaDeg) {
+    var a = alphaDeg * DEG, b = betaDeg * DEG, g = gammaDeg * DEG;
+    var ca = Math.cos(a), sa = Math.sin(a);
+    var cb = Math.cos(b), sb = Math.sin(b);
+    var cg = Math.cos(g), sg = Math.sin(g);
+
+    var r13 = ca * sg + sa * sb * cg;
+    var r23 = sa * sg - ca * sb * cg;
+    var r33 = cb * cg;
+
+    return [-r13, -r23, -r33]; // [Ost, Nord, Oben]
+  }
+
+  function vecToAzEl(v) {
+    var azimuth = Math.atan2(v[0], v[1]) * RAD; // 0=Nord, 90=Ost
+    if (azimuth < 0) azimuth += 360;
+    var elevation = Math.asin(clamp(v[2], -1, 1)) * RAD;
+    return { azimuth: azimuth, elevation: elevation };
+  }
+
+  function compassLabel(az) {
+    var idx = Math.round(az / 22.5) % 16;
+    return DIRS[idx];
+  }
+
+  function updateDisplay(alphaDeg, betaDeg, gammaDeg) {
+    var v = orientationToVector(alphaDeg, betaDeg, gammaDeg);
+    if (!smooth) {
+      smooth = v;
+    } else {
+      smooth = normalizeVec([
+        smooth[0] + (v[0] - smooth[0]) * SMOOTHING,
+        smooth[1] + (v[1] - smooth[1]) * SMOOTHING,
+        smooth[2] + (v[2] - smooth[2]) * SMOOTHING
+      ]);
+    }
+    var ae = vecToAzEl(smooth);
+    lastAzimuth = ae.azimuth;
+    lastElevation = ae.elevation;
+    azVal.textContent = ae.azimuth.toFixed(1) + '°';
+    azDir.textContent = compassLabel(ae.azimuth);
+    elVal.textContent = (ae.elevation >= 0 ? '+' : '') + ae.elevation.toFixed(1) + '°';
+  }
+
+  function setWarning(msg) {
+    if (!msg) { warnbar.classList.remove('show'); warnbar.textContent = ''; return; }
+    warnbar.textContent = msg;
+    warnbar.classList.add('show');
+  }
+
+  function handleOrientation(evt) {
+    gotAnyOrientation = true;
+    var alphaDeg, absolute = false;
+
+    if (typeof evt.webkitCompassHeading === 'number' && !isNaN(evt.webkitCompassHeading)) {
+      // iOS Safari: bereits eine (im Uhrzeigersinn zählende) Kompass-Peilung
+      alphaDeg = (360 - evt.webkitCompassHeading) % 360;
+      absolute = true;
+    } else if (typeof evt.alpha === 'number') {
+      alphaDeg = evt.alpha;
+      absolute = !!evt.absolute;
+    } else {
+      return;
+    }
+
+    compassLooksAbsolute = absolute;
+    var betaDeg = typeof evt.beta === 'number' ? evt.beta : 0;
+    var gammaDeg = typeof evt.gamma === 'number' ? evt.gamma : 0;
+
+    updateDisplay(alphaDeg, betaDeg, gammaDeg);
+
+    if (!absolute) {
+      setWarning('⚠️ Kompass evtl. nicht Nord-referenziert – Wert kann relativ sein. Falls verfügbar Kalibrierung/„Achterbewegung" durchführen.');
+    } else {
+      setWarning(null);
+    }
+  }
+
+  function startOrientation() {
+    if ('ondeviceorientationabsolute' in window) {
+      window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+    } else {
+      window.addEventListener('deviceorientation', handleOrientation, true);
+    }
+    // Falls nach 2s noch keine Daten ankamen, Hinweis anzeigen
+    setTimeout(function () {
+      if (!gotAnyOrientation) {
+        setWarning('⚠️ Keine Sensordaten empfangen. Bewegungssensoren evtl. nicht verfügbar/erlaubt.');
+      }
+    }, 2000);
+  }
+
+  function startCamera() {
+    return navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false
+    }).then(function (stream) {
+      camEl.srcObject = stream;
+      return camEl.play();
+    });
+  }
+
+  function requestOrientationPermission() {
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      return DeviceOrientationEvent.requestPermission().then(function (state) {
+        if (state !== 'granted') {
+          throw new Error('Zugriff auf Bewegungssensoren wurde nicht erlaubt.');
+        }
+      });
+    }
+    return Promise.resolve();
+  }
+
+  btnStart.addEventListener('click', function () {
+    starterror.style.display = 'none';
+    btnStart.disabled = true;
+    btnStart.textContent = 'Starte …';
+
+    startCamera()
+      .then(requestOrientationPermission)
+      .then(function () {
+        startOrientation();
+        startscreen.remove();
+      })
+      .catch(function (err) {
+        btnStart.disabled = false;
+        btnStart.textContent = 'Kamera & Sensoren aktivieren';
+        starterror.style.display = 'block';
+        starterror.textContent = 'Fehler: ' + (err && err.message ? err.message : err) +
+          '  (Hinweis: Seite muss über HTTPS aufgerufen werden, z. B. via GitHub Pages.)';
+      });
+  });
+
+  // ---- Punkte speichern / Liste / CSV-Export ----
+  function renderLog() {
+    logBody.innerHTML = '';
+    records.forEach(function (r, i) {
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + (i + 1) + '</td>' +
+        '<td>' + r.azimuth.toFixed(1) + '°</td>' +
+        '<td>' + (r.elevation >= 0 ? '+' : '') + r.elevation.toFixed(1) + '°</td>' +
+        '<td class="del" data-i="' + i + '">✕</td>';
+      logBody.appendChild(tr);
+    });
+  }
+
+  logBody.addEventListener('click', function (e) {
+    var i = e.target.getAttribute('data-i');
+    if (i !== null) {
+      records.splice(parseInt(i, 10), 1);
+      renderLog();
+    }
+  });
+
+  btnSave.addEventListener('click', function () {
+    records.push({
+      azimuth: lastAzimuth,
+      elevation: lastElevation,
+      t: new Date().toISOString()
+    });
+    renderLog();
+    logEl.classList.add('show');
+  });
+
+  btnToggleLog.addEventListener('click', function () {
+    logEl.classList.toggle('show');
+  });
+
+  btnClear.addEventListener('click', function () {
+    if (records.length && !confirm('Alle ' + records.length + ' gespeicherten Punkte löschen?')) return;
+    records = [];
+    renderLog();
+  });
+
+  btnExport.addEventListener('click', function () {
+    if (!records.length) { alert('Keine gespeicherten Punkte vorhanden.'); return; }
+    var csv = 'Nr;Azimuth_deg;Hoehenwinkel_deg;Zeitstempel\n';
+    records.forEach(function (r, i) {
+      csv += (i + 1) + ';' + r.azimuth.toFixed(2) + ';' + r.elevation.toFixed(2) + ';' + r.t + '\n';
+    });
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    dl.href = url;
+    dl.download = 'azimuth-hoehenwinkel-' + Date.now() + '.csv';
+    dl.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  });
+
+})();
+</script>
+</body>
+</html>
