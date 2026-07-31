@@ -91,17 +91,18 @@
     padding: 10px 12px max(12px, env(safe-area-inset-bottom)) 12px;
     background: linear-gradient(rgba(0,0,0,0.15), rgba(0,0,0,0.8));
   }
-  .btnrow { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .btnrow { display: flex; gap: 6px; flex-wrap: nowrap; }
   button {
-    font: inherit; font-size: 14px; font-weight: 600;
-    color: #fff; background: rgba(255,255,255,0.14);
-    border: 1px solid rgba(255,255,255,0.35);
-    border-radius: 10px; padding: 10px 14px;
+    font: inherit; font-size: 12.5px; font-weight: 500;
+    color: rgba(255,255,255,0.82); background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.16);
+    border-radius: 9px; padding: 9px 6px;
     backdrop-filter: blur(4px);
+    flex: 1 1 0; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  button:active { background: rgba(255,255,255,0.3); }
-  button.primary { background: #2f8f4e; border-color: #2f8f4e; }
-  button.danger { background: rgba(180,40,40,0.5); border-color: rgba(180,40,40,0.8); }
+  button:active { background: rgba(255,255,255,0.18); }
+  #btnSave { flex: 1.7 1 0; }
 
   #log {
     max-height: 26vh; overflow-y: auto; margin-top: 8px;
@@ -152,10 +153,10 @@
 
   <div id="controls">
     <div class="btnrow">
-      <button class="primary" id="btnSave">📍 Punkt speichern</button>
-      <button id="btnToggleLog">📋 Liste</button>
-      <button id="btnExport">⬇️ CSV</button>
-      <button class="danger" id="btnClear">🗑 Leeren</button>
+      <button id="btnSave">Punkt speichern</button>
+      <button id="btnToggleLog">Liste</button>
+      <button id="btnExport">CSV</button>
+      <button id="btnClear">Leeren</button>
     </div>
     <div id="log">
       <table>
