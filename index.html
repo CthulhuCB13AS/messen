@@ -134,6 +134,33 @@
   #starterror { color: #ff8a8a; font-size: 13px; max-width: 340px; display: none; }
 
   a.hidden-download { display: none; }
+
+  /* ---- Eigener Bestätigungs-Dialog (statt window.confirm, siehe unten) ---- */
+  #confirmOverlay {
+    position: fixed; inset: 0; z-index: 30;
+    background: rgba(0,0,0,0.55);
+    display: none; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  #confirmOverlay.show { display: flex; }
+  #confirmBox {
+    background: #16201a; border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 14px; padding: 20px; max-width: 320px; width: 100%;
+    text-align: center;
+  }
+  #confirmBox p { margin: 0 0 16px 0; font-size: 14.5px; line-height: 1.4; }
+  #confirmBox .btnrow { flex-wrap: nowrap; }
+  #confirmBox button { flex: 1 1 0; padding: 10px 8px; }
+
+  /* ---- Kurzer Hinweis-Toast (statt window.alert, siehe unten) ---- */
+  #toast {
+    position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%);
+    z-index: 25; background: rgba(20,20,20,0.92); color: #fff;
+    padding: 9px 16px; border-radius: 9px; font-size: 13px;
+    max-width: 85%; text-align: center;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+  }
+  #toast.show { opacity: 1; }
 </style>
 </head>
 <body>
@@ -186,6 +213,18 @@
 
   <a id="dl" class="hidden-download"></a>
 
+  <div id="toast"></div>
+
+  <div id="confirmOverlay">
+    <div id="confirmBox">
+      <p id="confirmText">Alle gespeicherten Punkte löschen?</p>
+      <div class="btnrow">
+        <button id="confirmCancel">Abbrechen</button>
+        <button id="confirmOk" class="primary">Löschen</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 (function () {
   "use strict";
@@ -205,6 +244,12 @@
   var logEl = document.getElementById('log');
   var logBody = document.getElementById('logBody');
   var dl = document.getElementById('dl');
+  var confirmOverlay = document.getElementById('confirmOverlay');
+  var confirmText = document.getElementById('confirmText');
+  var confirmOk = document.getElementById('confirmOk');
+  var confirmCancel = document.getElementById('confirmCancel');
+  var toastEl = document.getElementById('toast');
+  var toastTimer = null;
 
   var DEG = Math.PI / 180;
   var RAD = 180 / Math.PI;
@@ -368,6 +413,32 @@
       });
   });
 
+  // Hinweis: Wir verwenden bewusst KEINE window.confirm()/window.alert()-
+  // Dialoge. Auf manchen mobilen Browsern (v. a. iOS Safari) pausieren
+  // solche blockierenden System-Dialoge die laufende Kamera-Vorschau
+  // (getUserMedia-Stream) und lassen sie danach eingefroren zurück.
+  // Stattdessen: eigener, rein DOM-basierter Toast bzw. Bestätigungs-Dialog.
+  function showToast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 2200);
+  }
+
+  function showConfirm(message, onConfirm) {
+    confirmText.textContent = message;
+    confirmOverlay.classList.add('show');
+    function cleanup() {
+      confirmOverlay.classList.remove('show');
+      confirmOk.removeEventListener('click', okHandler);
+      confirmCancel.removeEventListener('click', cancelHandler);
+    }
+    function okHandler() { cleanup(); onConfirm(); }
+    function cancelHandler() { cleanup(); }
+    confirmOk.addEventListener('click', okHandler);
+    confirmCancel.addEventListener('click', cancelHandler);
+  }
+
   // ---- Punkte speichern / Liste / CSV-Export ----
   function renderLog() {
     logBody.innerHTML = '';
@@ -405,13 +476,15 @@
   });
 
   btnClear.addEventListener('click', function () {
-    if (records.length && !confirm('Alle ' + records.length + ' gespeicherten Punkte löschen?')) return;
-    records = [];
-    renderLog();
+    if (!records.length) return;
+    showConfirm('Alle ' + records.length + ' gespeicherten Punkte löschen?', function () {
+      records = [];
+      renderLog();
+    });
   });
 
   btnExport.addEventListener('click', function () {
-    if (!records.length) { alert('Keine gespeicherten Punkte vorhanden.'); return; }
+    if (!records.length) { showToast('Keine gespeicherten Punkte vorhanden.'); return; }
     var csv = 'Nr;Azimuth_deg;Hoehenwinkel_deg;Zeitstempel\n';
     records.forEach(function (r, i) {
       csv += (i + 1) + ';' + r.azimuth.toFixed(2) + ';' + r.elevation.toFixed(2) + ';' + r.t + '\n';
