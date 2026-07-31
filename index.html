@@ -342,8 +342,12 @@
     btnStart.disabled = true;
     btnStart.textContent = 'Starte …';
 
-    startCamera()
-      .then(requestOrientationPermission)
+    // Wichtig: requestPermission() für die Sensoren muss auf iOS als
+    // allererstes passieren, noch innerhalb der Tap-Geste. Wird zuerst
+    // auf die (asynchrone) Kamera-Erlaubnis gewartet, gilt der Tap in
+    // Safari als "verbraucht" und der Sensor-Dialog schlägt fehl.
+    requestOrientationPermission()
+      .then(startCamera)
       .then(function () {
         startOrientation();
         startscreen.remove();
