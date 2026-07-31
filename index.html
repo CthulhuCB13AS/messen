@@ -98,11 +98,17 @@
     border: 1px solid rgba(255,255,255,0.16);
     border-radius: 9px; padding: 9px 6px;
     backdrop-filter: blur(4px);
+  }
+  button:active { background: rgba(255,255,255,0.18); }
+  .btnrow button {
     flex: 1 1 0; min-width: 0;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  button:active { background: rgba(255,255,255,0.18); }
   #btnSave { flex: 1.7 1 0; }
+  button.primary {
+    background: #2f8f4e; border-color: #2f8f4e; color: #fff;
+  }
+  button.primary:active { background: #267a41; }
 
   #log {
     max-height: 26vh; overflow-y: auto; margin-top: 8px;
@@ -153,7 +159,7 @@
 
   <div id="controls">
     <div class="btnrow">
-      <button id="btnSave">Punkt speichern</button>
+      <button id="btnSave" class="primary">Punkt speichern</button>
       <button id="btnToggleLog">Liste</button>
       <button id="btnExport">CSV</button>
       <button id="btnClear">Leeren</button>
